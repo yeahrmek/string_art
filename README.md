@@ -1,1 +1,1 @@
-# thread_art
+# string_art
