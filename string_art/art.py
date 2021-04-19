@@ -1,9 +1,7 @@
-import tqdm
-
 from joblib import Parallel, delayed
 import numpy as np
 
-import PIL
+import cv2
 import matplotlib.pyplot as plt
 
 
@@ -24,19 +22,23 @@ def prepare_image(path, width=None, height=None, invert=True):
 
     """
 
-    image = PIL.Image.open(path)
-    if width is None and height is None:
-        width, height = image.size
-    elif width is None:
-        width = image.size[1] / height * image.size[0]
-    elif height is None:
-        height = image.size[0] / width * image.size[1]
+    image = cv2.imread(path)
 
-    image = np.array(image.resize((width, height)).convert(mode='L')).reshape(height, width)
+    # convert to grayscale
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    if width is None and height is None:
+        height, width = image.shape[:2]
+    elif width is None:
+        width = height / image.size[1] * image.size[0]
+    elif height is None:
+        height = width / image.size[0] * image.size[1]
+
+    image = cv2.resize(image, (width, height))
 
     if invert:
         image = 255 - image
-    return image#.T[:,::-1]
+    return image
 
 
 def get_hooks(n_hooks, width, height):
@@ -85,7 +87,7 @@ def get_hooks(n_hooks, width, height):
         )
     ]
 
-    return np.vstack(hooks)
+    return np.vstack(hooks).astype(int)
 
 
 def pixel_path(p0, p1):
@@ -132,110 +134,84 @@ def all_pixel_paths(hooks):
     """
     paths = {}
     for i, p0 in enumerate(hooks):
-        for j in range(i + 1, len(hooks)):
+        for j, p1 in enumerate(hooks):
+            if i == j:
+                continue
             p1 = hooks[j]
             paths[(i, j)] = pixel_path(p0, p1)
 
     return paths
 
 
-def loss(image, pixel_path, darkness=160, penalty=0, weight_type='mask'):
-    old_pixel_values = image[tuple(pixel_path[:, ::-1].T)]
-    # new_pixel_values = old_pixel_values - darkness
-
-
-    # if weight_type == 'values':
-    #     new_penalty = new_pixel_values[new_pixel_values > 0].sum() - \
-    #                   penalty * new_pixel_values[new_pixel_values < 0].sum()
-    #
-    #     old_penalty = old_pixel_values[old_pixel_values > 0].sum() - \
-    #                   penalty * old_pixel_values[old_pixel_values < 0].sum()
-    # elif weight_type == 'mask':
-    #     new_penalty = new_pixel_values.sum() - \
-    #                   (1 + penalty) * new_pixel_values[new_pixel_values < 0].sum()
-    #
-    #     old_penalty = old_pixel_values.sum() - \
-    #                   (1 + penalty) * old_pixel_values[old_pixel_values < 0].sum()
-    #
-    #     old_penalty = max(old_penalty, 0)
-
-    line_norm = len(pixel_path)
+def loss(image, pixel_path):
+    old_pixel_values = image[pixel_path[:, 1], pixel_path[:, 0]]
     error = old_pixel_values.sum()
-    error = max(error, 0)
-    return error / line_norm
-    # return (old_penalty - new_penalty) / line_norm
+    return error
 
 
-
-
-def optimize_line(image, start_hook, n_hooks, pixel_paths, **loss_kwargs):
-    def is_vertical_or_horizontal(i, j):
-        if i > j:
-            i, j = j, i
-        if pixel_paths[(i, j)][0, 0] == pixel_paths[(i, j)][-1, 0] or \
-                pixel_paths[(i, j)][0, 1] == pixel_paths[(i, j)][-1, 1]:
-            return True
-        return False
-
-    lines = [(i, start_hook) for i in range(start_hook)
-             if not is_vertical_or_horizontal(start_hook, i)] + \
-            [(start_hook, i) for i in range(start_hook + 1, n_hooks)
-             if not is_vertical_or_horizontal(start_hook, i)]
-
-    def get_line_loss(line):
-        return loss(image, pixel_paths[line], **loss_kwargs)
-
-    losses = Parallel(1)(delayed(get_line_loss)(line) for line in lines)
-    optimal_line = sorted(zip(losses, lines), key=lambda x: x[0])
-    return optimal_line[-1]
-
-
-def optimize(image, n_lines, hooks, pixel_paths, darkness=160, penalty=0, weight_type='mask',
-             show_plots=False):
+def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
+             min_offset=30, show_plots=False):
     lines = []
 
-    image = image.copy()
+    line_mask = np.zeros_like(image)
+    image = image.copy().astype(int)
     n_hooks = len(hooks)
 
     if show_plots:
-        fig, ax = plt.subplots(1, 1)
+        fig, ax = plt.subplots(1, 1, figsize=(8, 4))
         ax.scatter(hooks[:, 0], hooks[:, 1], s=5)
         ax.set_xlim([-5, image.shape[1] + 5])
         ax.set_ylim([image.shape[0] + 5, -5])
-        ax.set_aspect(image.shape[0] / image.shape[1])
+        # ax.set_aspect(image.shape[0] / image.shape[1])
 
+    start_hook = 0
+    prev_hooks = [start_hook]
     for i in range(n_lines):
+
         best_loss = -np.inf
         best_line = None
 
-        start_hool_list = np.random.permutation(n_hooks)
+        for start_hook in np.random.permutation(n_hooks)[:10]:
+            for offset in range(min_offset, n_hooks - min_offset):
 
-        # losses = Parallel(-1)(delayed(optimize_line)(
-        #     image, start_hook, n_hooks, pixel_paths, darkness=darkness,
-        #     penalty=penalty)
-        #     for start_hook in start_hool_list[:10]
-        # )
+                cur_hook = (start_hook + offset) % n_hooks
 
-        # losses = sorted(losses, key=lambda x: x[0])
-        # best_loss, best_line = losses[-1]
+                if cur_hook in prev_hooks:
+                    continue
 
-        for start_hook in start_hool_list[:10]:
-            loss, line = optimize_line(image, start_hook, n_hooks,
-                                       pixel_paths, darkness=darkness,
-                                       penalty=penalty, weight_type=weight_type)
-            if loss > best_loss:
-                best_loss = loss
-                best_line = line
+                path = pixel_paths[(start_hook, cur_hook)]
+                loss_val = loss(image, path)
+
+                if loss_val > best_loss:
+                    best_loss = loss_val
+                    best_line = (start_hook, cur_hook)
 
         lines.append(best_line)
-        pixel_path = pixel_paths[best_line]
-        image[tuple(pixel_path[:, ::-1].T)] -= darkness
+        line_mask = line_mask * 0
+        cv2.line(line_mask, tuple(hooks[best_line[0]]),
+                 tuple(hooks[best_line[1]]), line_weight, line_width)
+        image = image - line_mask.astype(int)
+
+        prev_hooks.append(best_line[1])
+        if len(prev_hooks) > 20:
+            prev_hooks = prev_hooks[1:]
 
         if show_plots:
             p0, p1 = hooks[best_line[0]], hooks[best_line[1]]
             ax.plot([p0[0], p1[0]], [p0[1], p1[1]],
                          c='k', lw=0.5, alpha=1)
-            fig.suptitle(f'N lines: {i + 1}')
+            fig.suptitle(f'N lines: {i + 1}\nLoss: {best_loss}')
             fig.canvas.draw()
 
     return image, lines
+
+
+def find_lines(image, n_hooks, n_lines, line_weight, line_width, show_progress=True):
+    hooks = get_hooks(n_hooks, *image.shape)
+
+    pixel_paths = all_pixel_paths(hooks)
+
+    image_opt, lines = optimize(image, n_lines, hooks, pixel_paths,
+                                line_weight=line_weight, line_width=line_width,
+                                show_plots=show_progress)
+    return lines
