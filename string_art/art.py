@@ -111,7 +111,7 @@ def get_hooks(n_hooks, width, height):
     return np.vstack(hooks).astype(int)
 
 
-def pixel_path(p0, p1):
+def get_pixel_path(p0, p1):
     """
     Return pixel path from p0 to p1
 
@@ -139,29 +139,18 @@ def pixel_path(p0, p1):
     path = np.clip(path, [0, 0], [max_x, max_y])
 
     path = np.unique(np.round(path), axis=0).astype(int)
-
     return path
 
 
-def all_pixel_paths(hooks):
-    """
-    Build dictionary of all pixel paths between given pixels
+def get_all_pixel_paths(hooks):
+    pixel_paths = {}
+    for i in range(len(hooks)):
+        for j in range(i + 1, len(hooks)):
+            pixel_paths[(i, j)] = get_pixel_path(
+                hooks[i], hooks[j])
+            pixel_paths[(j, i)] = pixel_paths[(i, j)]
 
-    Args:
-        hooks: np.ndarray
-
-    Returns:
-        dict
-    """
-    paths = {}
-    for i, p0 in enumerate(hooks):
-        for j, p1 in enumerate(hooks):
-            if i == j:
-                continue
-            p1 = hooks[j]
-            paths[(i, j)] = pixel_path(p0, p1)
-
-    return paths
+    return pixel_paths
 
 
 def loss(image, pixel_path):
@@ -230,13 +219,15 @@ def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
     return image, lines
 
 
-def find_lines(image, n_hooks, n_lines, line_weight, line_width, show_progress=True):
+def find_lines(image, n_hooks, n_lines, line_weight, line_width, min_offset=30,
+               min_loss=-5000, show_progress=True):
     hooks = get_hooks(n_hooks, *image.shape)
 
-    pixel_paths = all_pixel_paths(hooks)
+    pixel_paths = get_all_pixel_paths(hooks)
 
     image_opt, lines = optimize(image, n_lines, hooks, pixel_paths,
                                 line_weight=line_weight, line_width=line_width,
+                                min_offset=min_offset, min_loss=min_loss,
                                 show_plots=show_progress)
     return lines
 
