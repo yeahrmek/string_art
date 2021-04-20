@@ -1,3 +1,4 @@
+from joblib import Parallel, delayed
 import numpy as np
 
 import cv2
@@ -143,24 +144,39 @@ def get_pixel_path(p0, p1):
 
 
 def get_all_pixel_paths(hooks):
-    pixel_paths = {}
+    def get_path(i, j):
+        return i, j, get_pixel_path(hooks[i], hooks[j])
+
+    paths = Parallel(-1)(delayed(get_path)(i, j)
+                         for i in range(len(hooks))
+                         for j in range(i + 1, len(hooks)))
+    paths = {(i, j): p for i, j, p in paths}
+
     for i in range(len(hooks)):
         for j in range(i + 1, len(hooks)):
-            pixel_paths[(i, j)] = get_pixel_path(
-                hooks[i], hooks[j])
-            pixel_paths[(j, i)] = pixel_paths[(i, j)]
+            paths[(j, i)] = paths[(i, j)]
 
-    return pixel_paths
+    # for i in range(len(hooks)):
+    #     for j in range(i + 1, len(hooks)):
+    #         pixel_paths[(i, j)] = get_pixel_path(
+    #             hooks[i], hooks[j])
+    #         pixel_paths[(j, i)] = pixel_paths[(i, j)]
+
+    return paths
 
 
-def loss(image, pixel_path):
+def loss(image, pixel_path, norm='length'):
     old_pixel_values = image[pixel_path[:, 1], pixel_path[:, 0]]
     error = old_pixel_values.sum()
+    if norm == 'none':
+        pass
+    elif norm == 'length':
+        error /= len(pixel_path)
     return error
 
 
 def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
-             min_offset=30, show_plots=False, min_loss=-500):
+             min_offset=30, show_plots=False, min_loss=-500, **loss_kwargs):
     lines = []
 
     line_mask = np.zeros_like(image)
@@ -168,7 +184,7 @@ def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
     n_hooks = len(hooks)
 
     if show_plots:
-        fig, ax = plt.subplots(1, 1)
+        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
         ax.scatter(hooks[:, 0], hooks[:, 1], s=5)
         ax.set_xlim([-5, image.shape[1] + 5])
         ax.set_ylim([image.shape[0] + 5, -5])
@@ -190,7 +206,7 @@ def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
                     continue
 
                 path = pixel_paths[(start_hook, cur_hook)]
-                loss_val = loss(image, path)
+                loss_val = loss(image, path, **loss_kwargs)
 
                 if loss_val > best_loss:
                     best_loss = loss_val
@@ -220,7 +236,7 @@ def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
 
 
 def find_lines(image, n_hooks, n_lines, line_weight, line_width, min_offset=30,
-               min_loss=-5000, show_progress=True):
+               min_loss=-5000, show_progress=True, **loss_kwargs):
     hooks = get_hooks(n_hooks, *image.shape)
 
     pixel_paths = get_all_pixel_paths(hooks)
@@ -228,7 +244,7 @@ def find_lines(image, n_hooks, n_lines, line_weight, line_width, min_offset=30,
     image_opt, lines = optimize(image, n_lines, hooks, pixel_paths,
                                 line_weight=line_weight, line_width=line_width,
                                 min_offset=min_offset, min_loss=min_loss,
-                                show_plots=show_progress)
+                                show_plots=show_progress, **loss_kwargs)
     return lines
 
 
