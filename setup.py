@@ -5,5 +5,5 @@ setup(
     version="0.1",
     description="""Simple algorithm to draw a given image using threads.""",
     packages=["string_art"],
-    requires=["numpy", "skimage", "sklearn", "matplotlib"]
+    install_requires=["numpy", "matplotlib", "opencv-python"]
 )

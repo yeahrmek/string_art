@@ -1,4 +1,3 @@
-from joblib import Parallel, delayed
 import numpy as np
 
 import cv2
@@ -180,7 +179,7 @@ def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
     n_hooks = len(hooks)
 
     if show_plots:
-        fig, ax = plt.subplots(1, 1)#, figsize=(6, 6))
+        fig, ax = plt.subplots(1, 1)
         ax.scatter(hooks[:, 0], hooks[:, 1], s=5)
         ax.set_xlim([-5, image.shape[1] + 5])
         ax.set_ylim([image.shape[0] + 5, -5])
@@ -192,23 +191,6 @@ def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
 
         best_loss = -np.inf
         best_line = None
-
-        # def calc_loss(start_hook, cur_hook):
-        #     if cur_hook in prev_hooks:
-        #         return -np.inf
-        #     path = pixel_paths[(start_hook, cur_hook)]
-        #     return loss(image, path)
-
-        # lines = [(start_hook, (start_hook + offset) % n_hooks)
-        #          for start_hook in np.random.permutation(n_hooks)[:10]
-        #          for offset in range(min_offset, n_hooks - min_offset)]
-        #
-        # losses = Parallel(1)(delayed(calc_loss)(l[0], l[1]) for l in lines)
-        #
-        # best_loss, best_line = max(zip(losses, lines), key=lambda x: x[0])
-
-        # if best_loss < 0:
-        #     continue
 
         for start_hook in np.random.permutation(n_hooks)[:10]:
             for offset in range(min_offset, n_hooks - min_offset):
@@ -241,7 +223,7 @@ def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
         if show_plots:
             p0, p1 = hooks[best_line[0]], hooks[best_line[1]]
             ax.plot([p0[0], p1[0]], [p0[1], p1[1]],
-                         c='k', lw=0.5, alpha=1)
+                         c='k', lw=0.2, alpha=1)
             fig.suptitle(f'N lines: {i + 1}\nLoss: {best_loss}')
             fig.canvas.draw()
 
@@ -257,3 +239,10 @@ def find_lines(image, n_hooks, n_lines, line_weight, line_width, show_progress=T
                                 line_weight=line_weight, line_width=line_width,
                                 show_plots=show_progress)
     return lines
+
+
+def main():
+    pass
+
+if __name__ == "__main__":
+    main()
