@@ -5,6 +5,25 @@ import cv2
 import matplotlib.pyplot as plt
 
 
+def high_contrast(image):
+    # Converting image to LAB Color model
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+
+    # Splitting the LAB image to different channels
+    l, a, b = cv2.split(lab)
+
+    # Applying CLAHE to L-channel
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    cl = clahe.apply(l)
+
+    # Merge the CLAHE enhanced L-channel with the a and b channel
+    limg = cv2.merge((cl, a, b))
+
+    # Converting image from LAB Color model to RGB model
+    final = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+    return final
+
+
 def prepare_image(path, width=None, height=None, invert=True):
     """
     Prepare image
@@ -23,6 +42,9 @@ def prepare_image(path, width=None, height=None, invert=True):
     """
 
     image = cv2.imread(path)
+
+    # increase contrast
+    image = high_contrast(image)
 
     # convert to grayscale
     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -150,7 +172,7 @@ def loss(image, pixel_path):
 
 
 def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
-             min_offset=30, show_plots=False):
+             min_offset=30, show_plots=False, min_loss=-500):
     lines = []
 
     line_mask = np.zeros_like(image)
@@ -158,11 +180,11 @@ def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
     n_hooks = len(hooks)
 
     if show_plots:
-        fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+        fig, ax = plt.subplots(1, 1)#, figsize=(6, 6))
         ax.scatter(hooks[:, 0], hooks[:, 1], s=5)
         ax.set_xlim([-5, image.shape[1] + 5])
         ax.set_ylim([image.shape[0] + 5, -5])
-        # ax.set_aspect(image.shape[0] / image.shape[1])
+        ax.set_aspect('equal')
 
     start_hook = 0
     prev_hooks = [start_hook]
@@ -170,6 +192,23 @@ def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
 
         best_loss = -np.inf
         best_line = None
+
+        # def calc_loss(start_hook, cur_hook):
+        #     if cur_hook in prev_hooks:
+        #         return -np.inf
+        #     path = pixel_paths[(start_hook, cur_hook)]
+        #     return loss(image, path)
+
+        # lines = [(start_hook, (start_hook + offset) % n_hooks)
+        #          for start_hook in np.random.permutation(n_hooks)[:10]
+        #          for offset in range(min_offset, n_hooks - min_offset)]
+        #
+        # losses = Parallel(1)(delayed(calc_loss)(l[0], l[1]) for l in lines)
+        #
+        # best_loss, best_line = max(zip(losses, lines), key=lambda x: x[0])
+
+        # if best_loss < 0:
+        #     continue
 
         for start_hook in np.random.permutation(n_hooks)[:10]:
             for offset in range(min_offset, n_hooks - min_offset):
@@ -185,6 +224,9 @@ def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
                 if loss_val > best_loss:
                     best_loss = loss_val
                     best_line = (start_hook, cur_hook)
+
+        if best_loss < min_loss:
+            continue
 
         lines.append(best_line)
         line_mask = line_mask * 0
