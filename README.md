@@ -2,7 +2,7 @@
 
 ## Installation
 ```bash
-pip install https://github.com/yeahrmek/string_art
+pip install git+https://github.com/yeahrmek/string_art
 ```
 
 ## Run
