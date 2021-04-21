@@ -24,7 +24,7 @@ def high_contrast(image):
     return final
 
 
-def prepare_image(path, width=None, height=None, invert=True):
+def prepare_image(path, width=None, height=None, invert=True, high_contrast=False):
     """
     Prepare image
 
@@ -44,7 +44,8 @@ def prepare_image(path, width=None, height=None, invert=True):
     image = cv2.imread(path)
 
     # increase contrast
-    image = high_contrast(image)
+    if high_contrast:
+        image = high_contrast(image)
 
     # convert to grayscale
     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -63,7 +64,7 @@ def prepare_image(path, width=None, height=None, invert=True):
     return image
 
 
-def get_hooks(n_hooks, width, height):
+def get_hooks(n_hooks, height, width):
     """
     Generate hooks coordinates for the square image
 
@@ -80,31 +81,37 @@ def get_hooks(n_hooks, width, height):
     Returns:
         list(tuple(int, int))
     """
-    n_hooks_list = []
-    for i in range(4, 1, -1):
-        n_hooks_list.append(n_hooks // i + int((n_hooks % i) > 0))
-        n_hooks -= n_hooks_list[-1]
-    n_hooks_list.append(n_hooks)
+
+    ratio = width / height
+
+    n_hooks_list = [
+        int(n_hooks * ratio / (2 + 2 * ratio)),
+        None,
+        int(n_hooks * ratio / (2 + 2 * ratio)),
+        None
+    ]
+    n_hooks_list[1] = (n_hooks - 2 * n_hooks_list[0]) // 2
+    n_hooks_list[-1] = n_hooks - sum(n_hooks_list[:-1])
 
     hooks = [
         np.stack((
-            np.zeros(n_hooks_list[0]),
-            np.linspace(0, width - 1, n_hooks_list[0], endpoint=False)),
+            np.linspace(0, width - 1, n_hooks_list[0], endpoint=False),
+            np.zeros(n_hooks_list[0])),
             axis=1
         ),
         np.stack((
-            np.linspace(0, height - 1, n_hooks_list[1], endpoint=False),
-            np.ones(n_hooks_list[1]) * (width - 1)),
+            np.ones(n_hooks_list[1]) * (width - 1),
+            np.linspace(0, height - 1, n_hooks_list[1], endpoint=False)),
             axis=1
         ),
         np.stack((
-            np.ones(n_hooks_list[2]) * (height - 1),
-            np.linspace(width - 1, 0, n_hooks_list[2], endpoint=False)),
+            np.linspace(width - 1, 0, n_hooks_list[2], endpoint=False),
+            np.ones(n_hooks_list[2]) * (height - 1)),
             axis=1
         ),
         np.stack((
-            np.linspace(height - 1, 0, n_hooks_list[3], endpoint=False),
-            np.zeros(n_hooks_list[3])),
+            np.zeros(n_hooks_list[3]),
+            np.linspace(height - 1, 0, n_hooks_list[3], endpoint=False)),
             axis=1
         )
     ]
@@ -165,25 +172,25 @@ def get_all_pixel_paths(hooks):
     return paths
 
 
-def loss(image, pixel_path, norm='length'):
+def loss(image, pixel_path, line_norm='length'):
     old_pixel_values = image[pixel_path[:, 1], pixel_path[:, 0]]
     error = old_pixel_values.sum()
-    if norm == 'none':
+    if line_norm == 'none':
         pass
-    elif norm == 'length':
+    elif line_norm == 'length':
         error /= len(pixel_path)
     return error
 
 
 def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
-             min_offset=30, show_plots=False, min_loss=-500, **loss_kwargs):
+             min_offset=30, show_progress=False, min_loss=-500, **loss_kwargs):
     lines = []
 
     line_mask = np.zeros_like(image)
     image = image.copy().astype(int)
     n_hooks = len(hooks)
 
-    if show_plots:
+    if show_progress:
         fig, ax = plt.subplots(1, 1, figsize=(6, 6))
         ax.scatter(hooks[:, 0], hooks[:, 1], s=5)
         ax.set_xlim([-5, image.shape[1] + 5])
@@ -225,7 +232,7 @@ def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
         if len(prev_hooks) > 20:
             prev_hooks = prev_hooks[1:]
 
-        if show_plots:
+        if show_progress:
             p0, p1 = hooks[best_line[0]], hooks[best_line[1]]
             ax.plot([p0[0], p1[0]], [p0[1], p1[1]],
                          c='k', lw=0.2, alpha=1)
@@ -235,16 +242,27 @@ def optimize(image, n_lines, hooks, pixel_paths, line_weight=15, line_width=3,
     return image, lines
 
 
-def find_lines(image, n_hooks, n_lines, line_weight, line_width, min_offset=30,
-               min_loss=-5000, show_progress=True, **loss_kwargs):
+def thread_length(lines, hooks):
+    total_length = 0
+    for p0, p1 in lines:
+        total_length += np.linalg.norm(hooks[p0] - hooks[p1])
+
+    return total_length
+
+
+def pixel_to_meters(pixel_length, image_size, canvas_size):
+    pixel_width, pixel_height = np.array(canvas_size) / np.array(image_size)
+    pixel_diag = np.sqrt(pixel_width**2 + pixel_height**2)
+    return pixel_length * pixel_diag
+
+
+def find_lines(image, n_hooks, n_lines, optimizer_kwargs, loss_kwargs):
     hooks = get_hooks(n_hooks, *image.shape)
 
     pixel_paths = get_all_pixel_paths(hooks)
 
     image_opt, lines = optimize(image, n_lines, hooks, pixel_paths,
-                                line_weight=line_weight, line_width=line_width,
-                                min_offset=min_offset, min_loss=min_loss,
-                                show_plots=show_progress, **loss_kwargs)
+                                **optimizer_kwargs, **loss_kwargs)
     return lines
 
 
